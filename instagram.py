@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+from typing import Set
 
 import requests
 from requests.exceptions import *
@@ -160,7 +161,7 @@ class Agent:
             raise UnexpectedResponse(response.url, response.text)
 
     @exceptionDecorator
-    def getMedia(self, obj, count=12, settings={}):
+    def getMedia(self, obj, count=12, settings={}) -> Set['Media']:
         # Checks data
         if not isinstance(settings, dict):
             raise TypeError("'settings' must be dict type")
@@ -181,6 +182,16 @@ class Agent:
                 raise NotUpdatedElement(obj, 'name')
             data = {'query_id': 17875800862117404,
                     'variables': '{"tag_name": "' + obj.name + '", "first": ' + str(count) + '}'}
+        elif isinstance(obj, Feed):
+            data = {
+                'query_id': 17842794232208280,
+                'variables': """{
+                    "fetch_media_item_count": """ + str(count) + """,
+                    "fetch_comment_count": 0,
+                    "fetch_like": 0,
+                    "has_stories": false
+                }"""
+            }
         else:
             raise TypeError("'obj' must be Account type")
 
@@ -207,18 +218,23 @@ class Agent:
                     data = response.json()['data']['location']['edge_location_to_media']
                 elif isinstance(obj, Tag):
                     data = response.json()['data']['hashtag']['edge_hashtag_to_media']
+                elif isinstance(obj, Feed):
+                    data = response.json()['data']['user']['edge_web_feed_timeline']
                 for media in data['edges']:
                     m = Media(media['node']['shortcode'])
                     m.id = media['node']['id']
-                    m.caption = media['node']['edge_media_to_caption']['edges'][0]['node']['text']
+                    if len(media['node']['edge_media_to_caption']['edges']) > 0:
+                        m.caption = media['node']['edge_media_to_caption']['edges'][0]['node']['text']
+                    else:
+                        m.caption = ''
                     if isinstance(obj, Account):
                         m.owner = obj
                     m.date = media['node']['taken_at_timestamp']
-                    if 'location' in media['node']:
+                    if 'location' in media['node'] and not media['node']['location'] is None:
                         m.location = Location(media['node']['location']['id'])
                     if isinstance(obj, Location):
                         m.location = obj
-                    if isinstance(obj, Account):
+                    if isinstance(obj, Account) or isinstance(obj, Feed):
                         m.likes_count = media['node']['edge_media_preview_like']['count']
                     else:
                         m.likes_count = media['node']['edge_liked_by']
@@ -412,6 +428,20 @@ class Account(metaclass=ElementConstructor):
         self.country_block = data['country_block']
 
 
+class Feed(Agent):
+    def __init__(self):
+        self.media = set()
+        self.follows = set()
+        self.followers = set()
+
+    def getMedia(self, obj=None, count=12, settings=None) -> Set['Media']:
+        if settings is None:
+            settings = {}
+        if not obj is self:
+            obj = self
+        return super().getMedia(obj, count, settings)
+
+
 class AgentAccount(Account, Agent):
     # Session for user
     __session__ = requests.Session()
@@ -457,7 +487,7 @@ class AgentAccount(Account, Agent):
             obj = self
         return super().update(obj, settings)
 
-    def getMedia(self, obj=None, count=12, settings={}):
+    def getMedia(self, obj=None, count=12, settings={}) -> Set['Media']:
         if not obj:
             obj = self
         return super().getMedia(obj, count, settings)
